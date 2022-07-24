@@ -1,7 +1,5 @@
 name: Deploy container images
 
-description: Deploy Apahce Cassnadra containers with OpenTelemetry integration
-
 on:
   workflow_dispatch:
 

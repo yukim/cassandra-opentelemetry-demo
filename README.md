@@ -201,22 +201,35 @@ Execute the following to deploy the demo application:
 kubectl -n app apply -f k8s/app/deployment.yaml
 ```
 
-### 6.4. Expose the demo application
+## 7. Expose the demo application
 
-Expose the deployed application through load balancer:
+Since the demo application depends on in memory session, we need ingress controller that supports sticky session.
+
+### 7.1. Deploy NGINX ingress controller
+
+In the demo, NGINX ingress controller is used to deploy NGINX ingress which support sticky session.
 
 ```
-kubectl -n app expose deployment demo --type=LoadBalancer --port 80 --target-port 8080 --name=demo-lb
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.3.1/deploy/static/provider/aws/deploy.yaml
+```
+
+### 7.2. Create service and ingress
+
+Deploy the service to route to the application, and then deploy ingress.
+
+```
+kubectl -n app apply -f k8s/app/service.yaml
+kubectl -n app apply -f k8s/app/ingress.yaml
 ```
 
 Wait for the external load balancer to be created.
+
+```
+kubectl -n app get ingress
+```
 
 Make sure to update Google OAuth client setting with the load balancer URL.
 
 ## 7. Access the app
 
-Get the URL of the load balancer and access the demo:
-
-```
-kubectl -n app get svc
-```
+Get the URL of the load balancer and access the demo in the browser.

@@ -230,6 +230,6 @@ kubectl -n app get ingress
 
 Make sure to update Google OAuth client setting with the load balancer URL.
 
-## 7. Access the app
+## 8. Access the app
 
 Get the URL of the load balancer and access the demo in the browser.

@@ -1,0 +1,78 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: OpenTelemetryCollector
+metadata:
+  name: exporter
+  namespace: otel
+spec:
+  mode: deployment
+  # Use contrib version for more exporters
+  image: otel/opentelemetry-collector-contrib:0.60.0
+  replicas: 3
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 1
+    limits:
+      memory: 2Gi
+      cpu: 1
+  nodeSelector:
+    alpha.eksctl.io/nodegroup-name: ng-app
+  config: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 2000
+      batch:
+        send_batch_max_size: 8192
+    exporters:
+      otlp/lightstep:
+        endpoint: ingest.lightstep.com:443
+        headers:
+          lightstep-access-token: ${LIGHTSTEP_ACCESS_TOKEN}
+      datadog:
+        api:
+          key: ${DATADOG_API_KEY}
+      otlp/tempo:
+        endpoint: ${GRAFANA_CLOUD_TEMPO_ENDPOINT}
+        headers:
+          authorization: Basic ${GRAFANA_CLOUD_TEMPO_BASIC_AUTH}
+      prometheusremotewrite:
+        endpoint: ${GRAFANA_CLOUD_PROM_ENDPOINT}
+        headers:
+          authorization: Basic ${GRAFANA_CLOUD_PROM_BASIC_AUTH}
+        resource_to_telemetry_conversion:
+          enabled: true
+      loki:
+        endpoint: ${GRAFANA_CLOUD_LOKI_ENDPOINT}
+        headers:
+          authorization: Basic ${GRAFANA_CLOUD_LOKI_BASIC_AUTH}
+        tenant_id: cassandra
+        labels:
+          resource:
+            service.name: "service_name"
+    extensions:
+      health_check:
+      pprof:
+      zpages:
+    service:
+      extensions: [health_check,pprof,zpages]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [datadog, otlp/tempo, otlp/lightstep]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [datadog, prometheusremotewrite, otlp/lightstep]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [loki]
+  envFrom:
+  - secretRef:
+      name: otel-collector-keys

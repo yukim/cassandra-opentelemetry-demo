@@ -1,0 +1,40 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: OpenTelemetryCollector
+metadata:
+  name: otel-sidecar
+spec:
+  mode: sidecar
+  config: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 2000
+      batch:
+    exporters:
+      otlp:
+        endpoint: exporter-collector.otel.svc.cluster.local:4317
+        tls:
+          insecure: true
+    extensions:
+      health_check:
+      pprof:
+      zpages:
+    service:
+      extensions: [health_check,pprof,zpages]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter,batch]
+          exporters: [otlp]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter,batch]
+          exporters: [otlp]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter,batch]
+          exporters: [otlp]

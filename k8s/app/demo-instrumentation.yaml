@@ -1,0 +1,12 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: demo-instrumentation
+  namespace: app
+spec:
+  java:
+    env:
+    - name: OTEL_SERVICE_NAME
+      value: demo
+  sampler:
+    type: always_on

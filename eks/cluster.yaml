@@ -1,0 +1,13 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: cassandra-opentelemtry-demo
+  region: ap-northeast-1
+
+nodeGroups:
+  - name: ng-cassandra
+    instanceType: t3.xlarge
+    desiredCapacity: 3
+  - name: ng-app
+    instanceType: t3.xlarge
+    desiredCapacity: 3

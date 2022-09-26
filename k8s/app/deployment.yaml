@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: demo
+  name: demo
+  namespace: app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+      annotations:
+        sidecar.opentelemetry.io/inject: "otel-sidecar"
+        instrumentation.opentelemetry.io/inject-java: "demo-instrumentation"
+    spec:
+      containers:
+      - image: ghcr.io/yukim/sample-ecommerce-demo:0.1
+        imagePullPolicy: Always
+        name: sample-ecommerce-demo
+        ports:
+        - name: app
+          containerPort: 8080
+        - name: actuator
+          containerPort: 8081
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 1
+          limits:
+            memory: 2Gi
+            cpu: 1
+        env:
+        - name: JVM_OPTS
+          value: -Xms1G -Xmx1G
+        envFrom:
+        - secretRef:
+            name: demo-app-env
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8081
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8081
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 5

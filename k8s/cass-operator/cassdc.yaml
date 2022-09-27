@@ -51,7 +51,7 @@ spec:
           - name: OTEL_TRACES_SAMPLER_ARG
             value: "0.01"
           - name: OTEL_LOGS_EXPORTER
-            value: none
+            value: otlp
   config:
     jvm-server-options:
       initial_heap_size: "4G"

@@ -113,6 +113,27 @@ Deploy Cassandra cluster:
 kubectl -n cass-operator apply -f k8s/cass-operator/cassdc.yaml
 ```
 
+### 5.4. Update logback.xml for OpenTelemetry appender
+
+Since `logback.xml` modification is not possible through init container, copy `logback.xml` file to
+each container and reload the file.
+
+Copy `logback.xml`:
+
+```
+kubectl -n cass-operator cp k8s/cass-operator/logback.xml otel-demo-dc1-rack1-sts-0:/opt/cassandra/conf/ -c cassandra
+kubectl -n cass-operator cp k8s/cass-operator/logback.xml otel-demo-dc1-rack2-sts-0:/opt/cassandra/conf/ -c cassandra
+kubectl -n cass-operator cp k8s/cass-operator/logback.xml otel-demo-dc1-rack3-sts-0:/opt/cassandra/conf/ -c cassandra
+```
+
+Then, reload `logback.xml` on all the node:
+
+```
+kubectl -n cass-operator exec otel-demo-dc1-rack1-sts-0 -c cassandra -- nodetool sjk mx -b ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator -mc -op reloadDefaultConfiguration
+kubectl -n cass-operator exec otel-demo-dc1-rack2-sts-0 -c cassandra -- nodetool sjk mx -b ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator -mc -op reloadDefaultConfiguration
+kubectl -n cass-operator exec otel-demo-dc1-rack3-sts-0 -c cassandra -- nodetool sjk mx -b ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator -mc -op reloadDefaultConfiguration
+```
+
 ## 6. Deploy App
 
 In this demo, the modified version of ["Building an E-commerce Website"](https://github.com/yukim/workshop-ecommerce-app) is used.
@@ -167,6 +188,7 @@ kubectl -n cass-operator exec -it otel-demo-dc1-rack1-sts-0 -c cassandra -- cqls
 Execute the following CQLs to create `ecommerce` keyspace and the database user used from the app:
 
 ```
+otel-demo-superuser@cqlsh> ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 3};
 otel-demo-superuser@cqlsh> CREATE KEYSPACE IF NOT EXISTS ecommerce WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 3};
 otel-demo-superuser@cqlsh> CREATE ROLE demo WITH LOGIN = true AND PASSWORD = 'xxxxxx';
 otel-demo-superuser@cqlsh> GRANT ALL PERMISSIONS ON KEYSPACE ecommerce TO demo;

@@ -24,6 +24,10 @@ eksctl create cluster -f eks/cluster.yaml
 
 # Run demo on Kubernetes
 
+## Demo architecture
+
+![Demo architecture](./demo_architecture_diagram.png)
+
 ## 1. Install cert-manager
 
 [cert-manager](https://cert-manager.io/) is used by OpenTelemetry operator.
@@ -255,3 +259,9 @@ Make sure to update Google OAuth client setting with the load balancer URL.
 ## 8. Access the app
 
 Get the URL of the load balancer and access the demo in the browser.
+
+## 9. Check APMs for result
+
+### Lightstep
+
+![Tracing on Lightstep](./cassandra_tracing_in_lightstep.png)

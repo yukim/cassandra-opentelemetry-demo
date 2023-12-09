@@ -2,12 +2,36 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 metadata:
   name: cassandra-opentelemtry-demo
-  region: ap-northeast-1
+  region: us-east-1
+  tags:
+    Owner: yuki@datastax.com
 
-nodeGroups:
+addons:
+- name: vpc-cni
+  attachPolicyARNs:
+    - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+- name: aws-ebs-csi-driver
+  wellKnownPolicies:
+    ebsCSIController: true
+
+managedNodeGroups:
   - name: ng-cassandra
+    labels:
+      role: cassandra
     instanceType: t3.xlarge
     desiredCapacity: 3
+    iam:
+      withAddonPolicies:
+        ebs: true
+        cloudWatch: true
+        xRay: true
   - name: ng-app
+    labels:
+      role: app
     instanceType: t3.xlarge
     desiredCapacity: 3
+    iam:
+      withAddonPolicies:
+        ebs: true
+        cloudWatch: true
+        xRay: true

@@ -5,8 +5,8 @@ metadata:
   namespace: otel
 spec:
   mode: deployment
-  # Use contrib version for more exporters
-  image: otel/opentelemetry-collector-contrib:0.60.0
+  # Use contrib version for more exporters (Demo purpose only)
+  image: otel/opentelemetry-collector-contrib:0.90.1
   replicas: 3
   resources:
     requests:
@@ -29,46 +29,52 @@ spec:
       batch:
         send_batch_max_size: 8192
     exporters:
-      otlp/lightstep:
-        endpoint: ingest.lightstep.com:443
+      otlp/honeycomb:
+        endpoint: api.honeycomb.io:443
         headers:
-          lightstep-access-token: ${LIGHTSTEP_ACCESS_TOKEN}
+          x-honeycomb-team: ${HONEYCOMB_ACCESS_TOKEN}
       datadog:
         api:
           key: ${DATADOG_API_KEY}
       otlp/tempo:
         endpoint: ${GRAFANA_CLOUD_TEMPO_ENDPOINT}
-        headers:
-          authorization: Basic ${GRAFANA_CLOUD_TEMPO_BASIC_AUTH}
+        auth:
+          authenticator: basicauth/traces
       prometheusremotewrite:
         endpoint: ${GRAFANA_CLOUD_PROM_ENDPOINT}
-        headers:
-          authorization: Basic ${GRAFANA_CLOUD_PROM_BASIC_AUTH}
-        resource_to_telemetry_conversion:
-          enabled: true
+        auth:
+          authenticator: basicauth/metrics
       loki:
         endpoint: ${GRAFANA_CLOUD_LOKI_ENDPOINT}
-        headers:
-          authorization: Basic ${GRAFANA_CLOUD_LOKI_BASIC_AUTH}
-        tenant_id: cassandra
-        labels:
-          resource:
-            service.name: "service_name"
+        auth:
+          authenticator: basicauth/logs
     extensions:
       health_check:
       pprof:
       zpages:
+      basicauth/traces:
+        client_auth:
+          username: "${GRAFANA_CLOUD_TRACES_USER_ID}"
+          password: "${GRAFANA_CLOUD_API_KEY}"
+      basicauth/metrics:
+        client_auth:
+          username: "${GRAFANA_CLOUD_METRICS_USER_ID}"
+          password: "${GRAFANA_CLOUD_API_KEY}"
+      basicauth/logs:
+        client_auth:
+          username: "${GRAFANA_CLOUD_LOGS_USER_ID}"
+          password: "${GRAFANA_CLOUD_API_KEY}"
     service:
-      extensions: [health_check,pprof,zpages]
+      extensions: [basicauth/traces, basicauth/metrics, basicauth/logs, health_check, pprof, zpages]
       pipelines:
         traces:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [datadog, otlp/tempo, otlp/lightstep]
+          exporters: [datadog, otlp/tempo, otlp/honeycomb]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [datadog, prometheusremotewrite, otlp/lightstep]
+          exporters: [datadog, prometheusremotewrite]
         logs:
           receivers: [otlp]
           processors: [memory_limiter, batch]

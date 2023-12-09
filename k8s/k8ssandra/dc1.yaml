@@ -1,0 +1,59 @@
+apiVersion: k8ssandra.io/v1alpha1
+kind: K8ssandraCluster
+metadata:
+  name: otel-demo
+spec:
+  cassandra:
+    serverVersion: 5.0.0
+    serverImage: ghcr.io/yukim/cass-management-api:5.0-otel
+    containers:
+      - name: cassandra
+        imagePullPolicy: Always
+        env:
+          # This is required to run 5.0+ management api docker image
+          - name: MGMT_API_DISABLE_MCAC
+            value: "false"
+          # OpenTelemetry config
+          - name: OTEL_TRACES_SAMPLER
+            value: parentbased_traceidratio
+          - name: OTEL_TRACES_SAMPLER_ARG
+            value: "0.01"
+    datacenters:
+      - metadata:
+          name: dc1
+          pods:
+            annotations:
+              sidecar.opentelemetry.io/inject: otel-sidecar
+        size: 3
+        storageConfig:
+          cassandraDataVolumeClaimSpec:
+            storageClassName: gp3
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 10Gi
+        racks:
+          - name: rack1
+            nodeAffinityLabels:
+              alpha.eksctl.io/nodegroup-name: ng-cassandra
+          - name: rack2
+            nodeAffinityLabels:
+              alpha.eksctl.io/nodegroup-name: ng-cassandra
+          - name: rack3
+            nodeAffinityLabels:
+              alpha.eksctl.io/nodegroup-name: ng-cassandra
+        resources:
+          requests:
+            memory: 8Gi
+            cpu: 2
+          limits:
+            memory: 8Gi
+            cpu: 2
+        config:
+          jvmOptions:
+            heapSize: 4Gi
+            # Need to increase stack size (-Xss) because of okhttp3
+            vm_per_thread_stack_size: 512Ki
+            additionalJvmServerOptions:
+            - -Dcassandra.enable_opentelemetry=true

@@ -3,7 +3,7 @@
 The repository for Apache Cassandra OpenTelemetry integration demo.
 
 * `cassandra/`
-    * Dockerfile to build Apache Cassandra container image with OpenTelemetry integration from https://github.com/yukim/cassandra `cassandra-4.0-otel` branch.
+    * Dockerfile to build Apache Cassandra container image with OpenTelemetry integration from https://github.com/yukim/cassandra `otel` branch.
 * `k8s/`
     * Resource definitions for the demo
 * `management-api-for-cassandra/`
@@ -11,7 +11,7 @@ The repository for Apache Cassandra OpenTelemetry integration demo.
 
 # Tested demo environment
 
-* AWS EKS deployed on ap-northeast-1 region
+* AWS EKS deployed on us-east-1 region
     * 6 x t3.xlarge (4 vCPU / 16GiB mem) across 3 AZ
         * 3 nodes dedicated for Cassandra
         * other 3 nodes for apps / opentelemetry collector
@@ -35,7 +35,7 @@ eksctl create cluster -f eks/cluster.yaml
 In this demo, we use the dafault static install:
 
 ```
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.9.1/cert-manager.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.yaml
 ```
 
 ## 2. Install OpenTelemetry operator
@@ -44,15 +44,15 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 By default, operator is installed in `opentelemetry-operator-system` namespace.
 
 ```
-kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/download/v0.60.0/opentelemetry-operator.yaml
+kubectl apply -f https://github.com/open-telemetry/opentelemetry-operator/releases/download/v0.90.0/opentelemetry-operator.yaml
 ```
 
-## 3. Install cass-operator
+## 3. Install k8ssandra-operator
 
-Cassandra cluster is created by [cass-oeprator](https://github.com/k8ssandra/cass-operator/) in the default `cass-operator` namespace.
+Cassandra cluster is created by [k8ssandra-oeprator](https://github.com/k8ssandra/k8ssandra-operator/) in the default `k8ssandra-operator` namespace.
 
 ```
-kubectl apply --force-conflicts --server-side -k github.com/k8ssandra/cass-operator/config/deployments/default?ref=v1.12.0
+kubectl apply --force-conflicts --server-side -k "github.com/k8ssandra/k8ssandra-operator/config/deployments/control-plane?ref=v1.10.3"
 ```
 
 ## 4. Deploy OpenTelemetry collector
@@ -73,7 +73,7 @@ kubectl create namespace otel
 
 Before deploying, generate appropriate secret with API key for external services.
 
-In this demo, [lightstep](https://lightstep.com/), [datadog](https://www.datadoghq.com/), and [Grafana Cloud]() are used.
+In this demo, [Honeycomb](https://www.servicenow.com/products/observability.html), [datadog](https://www.datadoghq.com/), and [Grafana Cloud]() are used.
 
 Create `.env` file according to [.env.sample](./k8s/opentelemetry-collector/.env.sample) file, and create kubernetes Secret from env file.
 
@@ -96,17 +96,15 @@ This should deploy 3 OpenTelemetry collectors deployment named `exporter`, along
 Cassandra pods are injected with OpenTelemetry collector sidecar by OpenTelemetry operator. Before deploying Cassandra, OpenTelemetry configuration for sidecar should be created in the same namespace.
 
 ```
-kubectl -n cass-operator apply -f k8s/opentelemetry-collector/otel-sidecar.yaml
+kubectl -n k8ssandra-operator apply -f k8s/opentelemetry-collector/otel-sidecar.yaml
 ```
 
 ### 5.2. Create Storage class
 
-Create appropriate storage class named `server-storage` to store Cassandra data if not yet created.
-
-For Amazon EKS, execute:
+Create appropriate storage class named `gp3` to store Cassandra data if not yet created.
 
 ```
-kubectl apply -f https://raw.githubusercontent.com/k8ssandra/cass-operator/master/operator/k8s-flavors/eks/storage.yaml
+kubectl apply -f eks/sc.yaml
 ```
 
 ### 5.3. Deploy Cassandra cluster
@@ -114,28 +112,7 @@ kubectl apply -f https://raw.githubusercontent.com/k8ssandra/cass-operator/maste
 Deploy Cassandra cluster:
 
 ```
-kubectl -n cass-operator apply -f k8s/cass-operator/cassdc.yaml
-```
-
-### 5.4. Update logback.xml for OpenTelemetry appender
-
-Since `logback.xml` modification is not possible through init container, copy `logback.xml` file to
-each container and reload the file.
-
-Copy `logback.xml`:
-
-```
-kubectl -n cass-operator cp k8s/cass-operator/logback.xml otel-demo-dc1-rack1-sts-0:/opt/cassandra/conf/ -c cassandra
-kubectl -n cass-operator cp k8s/cass-operator/logback.xml otel-demo-dc1-rack2-sts-0:/opt/cassandra/conf/ -c cassandra
-kubectl -n cass-operator cp k8s/cass-operator/logback.xml otel-demo-dc1-rack3-sts-0:/opt/cassandra/conf/ -c cassandra
-```
-
-Then, reload `logback.xml` on all the node:
-
-```
-kubectl -n cass-operator exec otel-demo-dc1-rack1-sts-0 -c cassandra -- nodetool sjk mx -b ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator -mc -op reloadDefaultConfiguration
-kubectl -n cass-operator exec otel-demo-dc1-rack2-sts-0 -c cassandra -- nodetool sjk mx -b ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator -mc -op reloadDefaultConfiguration
-kubectl -n cass-operator exec otel-demo-dc1-rack3-sts-0 -c cassandra -- nodetool sjk mx -b ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator -mc -op reloadDefaultConfiguration
+kubectl -n k8ssandra-operator apply -f k8s/k8ssandra/dc1.yaml
 ```
 
 ## 6. Deploy App
@@ -180,19 +157,18 @@ kubectl -n app apply -f k8s/opentelemetry-collector/otel-sidecar.yaml
 First, get the super user password from the kubernetes secret:
 
 ```
-kubectl -n cass-operator get secret otel-demo-superuser --template '{{ .data.password }}' | base64 -d 
+export PASSWORD=`kubectl -n k8ssandra-operator get secret otel-demo-superuser --template '{{ .data.password }}' | base64 -d`
 ```
 
 Use that password to login to the cluster:
 
 ```
-kubectl -n cass-operator exec -it otel-demo-dc1-rack1-sts-0 -c cassandra -- cqlsh -u otel-demo-superuser
+kubectl -n k8ssandra-operator exec -it otel-demo-dc1-rack1-sts-0 -c cassandra -- cqlsh -u otel-demo-superuser
 ```
 
 Execute the following CQLs to create `ecommerce` keyspace and the database user used from the app:
 
 ```
-otel-demo-superuser@cqlsh> ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 3};
 otel-demo-superuser@cqlsh> CREATE KEYSPACE IF NOT EXISTS ecommerce WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 3};
 otel-demo-superuser@cqlsh> CREATE ROLE demo WITH LOGIN = true AND PASSWORD = 'xxxxxx';
 otel-demo-superuser@cqlsh> GRANT ALL PERMISSIONS ON KEYSPACE ecommerce TO demo;
@@ -236,7 +212,7 @@ Since the demo application depends on in memory session, we need ingress control
 In the demo, NGINX ingress controller is used to deploy NGINX ingress which support sticky session.
 
 ```
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.3.1/deploy/static/provider/aws/deploy.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.9.4/deploy/static/provider/aws/deploy.yaml
 ```
 
 ### 7.2. Create service and ingress

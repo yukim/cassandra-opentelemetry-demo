@@ -1,154 +1,117 @@
-# Based on https://github.com/apache/cassandra-builds/blob/trunk/docker/buster-image.docker
-# for building Apache Cassandra from source,
-# and https://github.com/docker-library/cassandra/blob/master/4.0/Dockerfile
-# for Apache Cassandra image based on the build.
-FROM debian:buster as builder
+# Based on https://github.com/k8ssandra/management-api-for-apache-cassandra/blob/master/Dockerfile-5_0.ubi8
+# Management API jars and CDC agent are taken from the existing 5.0-ubi8 image.
+# (This version does not include Metrics collector for Apache Cassandra.)
+#
+# Apache Cassadnra with OpenTelemetry instrumentation is taken from `5.0-otel` branch of yukim/cassandra repo. 
+ARG UBI_MAJOR=8
+ARG UBI_BASETAG=latest
+ARG CASSANDRA_VERSION=5.0-beta1-SNAPSHOT
 
-ENV DEB_DIST_DIR=/dist
-ENV BUILD_HOME=/home/build
-ENV CASSANDRA_DIR=$BUILD_HOME/cassandra
-ARG UID_ARG=1000
-ARG GID_ARG=1000
+FROM k8ssandra/cass-management-api:5.0-ubi8 as maac
 
-LABEL org.cassandra.buildenv=buster
+#############################################################
 
-VOLUME ${DEB_DIST_DIR}
-
-# configure apt to retry downloads
-RUN echo 'APT::Acquire::Retries "9";' > /etc/apt/apt.conf.d/80-retries
-
-# install deps
-RUN apt-get update && apt-get -y install \
-    ant \
-    build-essential \
-    curl \
-    devscripts \
-    git \
-    sudo
-
-RUN echo 'deb http://ftp.debian.org/debian stretch main' >> /etc/apt/sources.list \
+# Build and extract Cassandra
+FROM --platform=$BUILDPLATFORM azul/zulu-openjdk-debian:11 as cass-builder
+ARG CASSANDRA_VERSION
+ARG COMMITSHA="HEAD"
+ENV CASSANDRA_PATH /opt/cassandra
+ENV CASSANDRA_FILES_PATH /opt/cassandra_files
+WORKDIR /build
+RUN set -x \
+    && rm -fr /etc/apt/sources.list.d/* \
+    && rm -rf /var/lib/apt/lists/* \
     && apt-get update \
-    && apt-get install -y --no-install-recommends openjdk-11-jdk \
-    && sed -i '$d' /etc/apt/sources.list \
-    && apt-get update
+    && apt-get install -y --no-install-recommends git ant ant-optional make maven \
+    && git clone -b 5.0-otel --single-branch https://github.com/yukim/cassandra.git \
+    && cd cassandra \
+    && git checkout $(git rev-parse --short ${COMMITSHA}) \
+    #&& ant -q -S echo-base-version > /build/cassandra.version \
+    # create an empty javadoc archive so we can skip javadoc generation
+    && mkdir -p ./build/ \
+    && touch ./build/apache-cassandra-${CASSANDRA_VERSION}-javadoc.jar \
+    && ant artifacts mvn-install -Duse.jdk11=true -Dno-javadoc=true \
+    && mkdir -m 775 ${CASSANDRA_PATH} ${CASSANDRA_FILES_PATH} \
+    && tar --directory ${CASSANDRA_PATH} --strip-components 1 --gzip --extract --file /build/cassandra/build/apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz \
+    && rm -rf ${CASSANDRA_PATH}/javadoc ${CASSANDRA_PATH}/doc \
+    && chmod -R g+w ${CASSANDRA_PATH}
+COPY cassandra/files ${CASSANDRA_FILES_PATH}
 
-# create and change to build user
-RUN groupadd --gid ${GID_ARG} --non-unique build \
-    && adduser --uid ${UID_ARG} --gid ${GID_ARG} --disabled-login --gecos build build \
-    && gpasswd -a build sudo
+#############################################################
 
-RUN echo "build ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/build && \
-    chmod 0440 /etc/sudoers.d/build
+FROM registry.access.redhat.com/ubi${UBI_MAJOR}/ubi-minimal:${UBI_BASETAG}
+ARG TARGETARCH
+ARG CASSANDRA_VERSION
+ENV CASSANDRA_VERSION=${CASSANDRA_VERSION}
 
-USER build
+LABEL maintainer="Yuki Morishita <yukim@apache.org>"
+LABEL name="Apache Cassandra"
+LABEL release="${CASSANDRA_VERSION}"
+LABEL summary="Apache Cassandra is an open source distributed database management system designed to handle large amounts of data across many commodity servers, providing high availability with no single point of failure. Cassandra offers robust support for clusters spanning multiple datacenters, with asynchronous masterless replication allowing low latency operations for all clients."
+LABEL description="Apache Cassandra is an open source distributed database management system designed to handle large amounts of data across many commodity servers, providing high availability with no single point of failure. Cassandra offers robust support for clusters spanning multiple datacenters, with asynchronous masterless replication allowing low latency operations for all clients."
 
-# clone Cassandra and cache maven artifacts
-ARG CASSANDRA_GIT_URL=https://github.com/yukim/cassandra.git
-ARG OTEL_BRANCH=cassandra-4.0-otel
-RUN git config --global http.postBuffer 524288000
-RUN git clone --depth 1 --branch ${OTEL_BRANCH} --single-branch ${CASSANDRA_GIT_URL} ${CASSANDRA_DIR}
-WORKDIR ${CASSANDRA_DIR}
+ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 
-RUN ant -Duse.jdk11=true resolver-retrieve-build
-RUN ant -Duse.jdk11=true -Dno-javadoc=true -Dant.gen-doc.skip=true artifacts \
-    && sudo cp ${CASSANDRA_DIR}/build/apache-cassandra-*-bin.tar.gz /cassandra-bin.tgz
+ENV CASSANDRA_PATH /opt/cassandra
+ENV MAAC_PATH /opt/management-api
+ENV CDC_AGENT_PATH=/opt/cdc_agent
 
-FROM eclipse-temurin:11-jre-focal
+ENV PATH ${CASSANDRA_PATH}/bin:${PATH}
+ENV CASSANDRA_HOME ${CASSANDRA_PATH}
+ENV CASSANDRA_CONF ${CASSANDRA_PATH}/conf
+ENV CASSANDRA_LOG_DIR /var/log/cassandra
+ENV CASSANDRA_DATA_DIR /var/lib/cassandra
 
-# explicitly set user/group IDs
-RUN set -eux; \
-    groupadd -r cassandra --gid=999; \
-    useradd -r -g cassandra --uid=999 cassandra
+ENV CASSANDRA_FILES_PATH /opt/cassandra_files
 
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-    # solves warning: "jemalloc shared library could not be preloaded to speed up memory allocations"
-    libjemalloc2 \
-    # "free" is used by cassandra-env.sh
-    procps \
-    # "cqlsh" needs a python interpreter
-    python3 \
-    # "ip" is not required by Cassandra itself, but is commonly used in scripting Cassandra's configuration (since it is so fixated on explicit IP addresses)
-    iproute2 \
-    # Cassandra will automatically use numactl if available
-    #   https://github.com/apache/cassandra/blob/18bcda2d4c2eba7370a0b21f33eed37cb730bbb3/bin/cassandra#L90-L100
-    #   https://github.com/apache/cassandra/commit/604c0e87dc67fa65f6904ef9a98a029c9f2f865a
-    numactl \
-    ; \
-    rm -rf /var/lib/apt/lists/*; \
-    # https://issues.apache.org/jira/browse/CASSANDRA-15767 ("bin/cassandra" only looks for "libjemalloc.so" or "libjemalloc.so.1" which doesn't match our "libjemalloc.so.2")
-    libjemalloc="$(readlink -e /usr/lib/*/libjemalloc.so.2)"; \
-    ln -sT "$libjemalloc" /usr/local/lib/libjemalloc.so; \
-    ldconfig
+# Update base layer
+RUN microdnf update && rm -rf /var/cache/yum \
+# Install packages needed during install process
+    && microdnf module enable python38 \
+    && microdnf install --nodocs java-11-openjdk-headless tzdata-java python38 zlib findutils which hostname iproute shadow-utils procps util-linux glibc-langpack-en wget \
+    && microdnf clean all \
+# Add Cassandra user
+    && groupadd -r cassandra --gid=999 \
+    && useradd -m -d "$CASSANDRA_HOME" -r -g cassandra -G root --uid=999 cassandra
 
-# grab gosu for easy step-down from root
-# https://github.com/tianon/gosu/releases
-ENV GOSU_VERSION 1.14
-RUN set -eux; \
-    savedAptMark="$(apt-mark showmanual)"; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates dirmngr gnupg wget; \
-    rm -rf /var/lib/apt/lists/*; \
-    dpkgArch="$(dpkg --print-architecture | awk -F- '{ print $NF }')"; \
-    wget -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch"; \
-    wget -O /usr/local/bin/gosu.asc "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$dpkgArch.asc"; \
-    export GNUPGHOME="$(mktemp -d)"; \
-    gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4; \
-    gpg --batch --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu; \
-    gpgconf --kill all; \
-    rm -rf "$GNUPGHOME" /usr/local/bin/gosu.asc; \
-    apt-mark auto '.*' > /dev/null; \
-    [ -z "$savedAptMark" ] || apt-mark manual $savedAptMark > /dev/null; \
-    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
-    chmod +x /usr/local/bin/gosu; \
-    gosu --version; \
-    gosu nobody true
+# Copy trimmed installation
+COPY --from=cass-builder --chown=cassandra:root ${CASSANDRA_PATH} ${CASSANDRA_PATH}
+COPY --from=cass-builder --chown=cassandra:root ${CASSANDRA_PATH}/LICENSE.txt /licenses/
+COPY --from=cass-builder --chown=cassandra:root ${CASSANDRA_FILES_PATH} /
+COPY --from=maac --chown=cassandra:root ${CDC_AGENT_PATH} ${CDC_AGENT_PATH}
+COPY --from=maac --chown=cassandra:root ${MAAC_PATH} ${MAAC_PATH}
+# logback.xml for OpenTelemetry logging
+COPY cassandra/logback.xml ${CASSANDRA_CONF}/
 
-ENV CASSANDRA_HOME /opt/cassandra
-ENV CASSANDRA_CONF /etc/cassandra
-ENV PATH $CASSANDRA_HOME/bin:$PATH
+# Create directories
+RUN (for dir in ${CASSANDRA_DATA_DIR} \
+                ${CASSANDRA_LOG_DIR} ; do \
+        mkdir -p $dir && chown -R cassandra:root $dir && chmod 775 $dir ; \
+    done ) && \
+    ln -sT ${CASSANDRA_DATA_DIR} ${CASSANDRA_HOME}/data && \
+    ln -sT ${CASSANDRA_LOG_DIR} ${CASSANDRA_HOME}/logs && \
+    # setup conf directory
+    [ ! -e "/etc/cassandra" ]; \
+    mv ${CASSANDRA_CONF} /etc/cassandra && \
+    ln -sT /etc/cassandra ${CASSANDRA_CONF} && \
+    # change mode of directories
+    chmod a+rwX ${MAAC_PATH} ${CASSANDRA_PATH} ${CDC_AGENT_PATH} /etc/cassandra
 
-COPY --chown=cassandra:cassandra --from=builder /cassandra-bin.tgz .
+ENV TINI_VERSION v0.19.0
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-${TARGETARCH} /tini
+RUN chmod +x /tini
 
-RUN set -eux; \
-    mkdir -p "$CASSANDRA_HOME"; \
-    tar --extract --file cassandra-bin.tgz --directory "$CASSANDRA_HOME" --strip-components 1; \
-    rm cassandra-bin.tgz*; \
-    \
-    [ ! -e "$CASSANDRA_CONF" ]; \
-    mv "$CASSANDRA_HOME/conf" "$CASSANDRA_CONF"; \
-    ln -sT "$CASSANDRA_CONF" "$CASSANDRA_HOME/conf"; \
-    \
-    dpkgArch="$(dpkg --print-architecture)"; \
-    case "$dpkgArch" in \
-    ppc64el) \
-    # https://issues.apache.org/jira/browse/CASSANDRA-13345
-    # "The stack size specified is too small, Specify at least 328k"
-    grep -- '^-Xss256k$' "$CASSANDRA_CONF/jvm-server.options"; \
-    sed -ri 's/^-Xss256k$/-Xss512k/' "$CASSANDRA_CONF/jvm-server.options"; \
-    grep -- '^-Xss512k$' "$CASSANDRA_CONF/jvm-server.options"; \
-    ;; \
-    esac; \
-    \
-    mkdir -p "$CASSANDRA_CONF" /var/lib/cassandra /var/log/cassandra; \
-    chown -R cassandra:cassandra "$CASSANDRA_CONF" /var/lib/cassandra /var/log/cassandra; \
-    chmod 777 "$CASSANDRA_CONF" /var/lib/cassandra /var/log/cassandra; \
-    chmod -R a+rwX "$CASSANDRA_CONF"; \
-    ln -sT /var/lib/cassandra "$CASSANDRA_HOME/data"; \
-    ln -sT /var/log/cassandra "$CASSANDRA_HOME/logs"; \
-    \
-    # smoke test
-    cassandra -v
+# Set user to run as
+USER cassandra
 
-VOLUME /var/lib/cassandra
+# Expose CASSANDRA folders
+VOLUME ["/var/lib/cassandra", "/var/log/cassandra"]
 
-COPY docker-entrypoint.sh /usr/local/bin/
-ENTRYPOINT ["docker-entrypoint.sh"]
+# MANAGEMENT API, MCAC METRICS, NON-MCAC METRICS
+EXPOSE 8080 9103 9000
 
-# 7000: intra-node communication
-# 7001: TLS intra-node communication
-# 7199: JMX
-# 9042: CQL
-EXPOSE 7000 7001 7199 9042
-CMD ["cassandra", "-f"]
+# CASSANDRA PORTS (INTRA-NODE, TLS INTRA-NODE, JMX, CQL, THRIFT, DSEFS INTRA-NODE, INTRA-NODE MESSAGING SERVICE)
+EXPOSE 7000 7001 7199 8609 9042 9160
+
+ENTRYPOINT ["/tini", "-g", "--", "/entrypoint.sh"]
+CMD ["mgmtapi"]

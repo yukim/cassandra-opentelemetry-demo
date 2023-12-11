@@ -14,6 +14,8 @@ spec:
           - name: MGMT_API_DISABLE_MCAC
             value: "false"
           # OpenTelemetry config
+          - name: OTEL_SERVICE_NAME
+            value: cassandra
           - name: OTEL_TRACES_SAMPLER
             value: parentbased_traceidratio
           - name: OTEL_TRACES_SAMPLER_ARG

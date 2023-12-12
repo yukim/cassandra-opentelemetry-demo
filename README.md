@@ -3,11 +3,9 @@
 The repository for Apache Cassandra OpenTelemetry integration demo.
 
 * `cassandra/`
-    * Dockerfile to build Apache Cassandra container image with OpenTelemetry integration from https://github.com/yukim/cassandra `otel` branch.
+    * Dockerfile to build container image from https://github.com/k8ssandra/management-api-for-apache-cassandra to include Apache Cassandra with OpenTelemetry integration.
 * `k8s/`
     * Resource definitions for the demo
-* `management-api-for-cassandra/`
-    * Dockerfile to build container image from https://github.com/k8ssandra/management-api-for-apache-cassandra to include Apache Cassandra with OpenTelemetry integration.
 
 # Tested demo environment
 

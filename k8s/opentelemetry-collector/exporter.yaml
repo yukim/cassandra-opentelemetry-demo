@@ -48,6 +48,8 @@ spec:
         endpoint: ${GRAFANA_CLOUD_LOKI_ENDPOINT}
         auth:
           authenticator: basicauth/logs
+      awsxray:
+      awsemf:
     extensions:
       health_check:
       pprof:
@@ -70,15 +72,15 @@ spec:
         traces:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [datadog, otlp/tempo, otlp/honeycomb]
+          exporters: [datadog, otlp/tempo, otlp/honeycomb, awsxray]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [datadog, prometheusremotewrite]
+          exporters: [datadog, prometheusremotewrite, awsemf]
         logs:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [loki]
+          exporters: [datadog, loki]
   envFrom:
   - secretRef:
       name: otel-collector-keys
